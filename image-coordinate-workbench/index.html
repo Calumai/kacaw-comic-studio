@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="本機圖片定位與標註製作台，輸出精準像素座標與 AI 修改指令。"
+    />
+    <title>圖像定位台</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app-shell" data-tool="select">
+      <header class="topbar">
+        <div class="brand" aria-label="圖像定位台">
+          <span class="brand-mark" aria-hidden="true">⌖</span>
+          <div>
+            <h1>圖像定位台</h1>
+            <p>框出位置，直接交給 AI</p>
+          </div>
+        </div>
+
+        <div class="topbar-actions">
+          <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+          <input id="projectInput" type="file" accept="application/json,.json" hidden />
+          <button id="openImageButton" class="button button-primary" type="button">
+            <span aria-hidden="true">＋</span> 載入圖片
+          </button>
+          <button id="undoButton" class="icon-button" type="button" title="復原 Ctrl+Z" disabled>↶</button>
+          <button id="redoButton" class="icon-button" type="button" title="重做 Ctrl+Y" disabled>↷</button>
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <button id="fitButton" class="button button-quiet" type="button" title="小圖維持原始尺寸，大圖等比例縮小" disabled>適合畫面</button>
+          <button id="actualButton" class="button button-quiet" type="button" disabled>100%</button>
+          <output id="zoomOutput" class="zoom-output">100%</output>
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <button id="exportMenuButton" class="button button-accent" type="button" disabled>匯出 ▾</button>
+          <div id="exportMenu" class="menu" hidden>
+            <button type="button" data-export="annotated">帶標註 PNG</button>
+            <button type="button" data-export="overlay">透明標註層 PNG</button>
+            <button type="button" data-export="json">定位專案 JSON</button>
+            <button type="button" data-export="prompt">AI 修改指令 TXT</button>
+          </div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <nav class="toolrail" aria-label="標註工具">
+          <button class="tool-button is-active" type="button" data-tool="select" aria-pressed="true" title="選取 V">
+            <span aria-hidden="true">↖</span><small>選取</small>
+          </button>
+          <button class="tool-button" type="button" data-tool="point" aria-pressed="false" title="點位 P">
+            <span aria-hidden="true">⊕</span><small>點位</small>
+          </button>
+          <button class="tool-button" type="button" data-tool="rect" aria-pressed="false" title="框選 R">
+            <span aria-hidden="true">▢</span><small>框選</small>
+          </button>
+          <button class="tool-button" type="button" data-tool="arrow" aria-pressed="false" title="箭頭 A">
+            <span aria-hidden="true">↗</span><small>箭頭</small>
+          </button>
+          <button class="tool-button" type="button" data-tool="pan" aria-pressed="false" title="平移 H 或 Space">
+            <span aria-hidden="true">✥</span><small>平移</small>
+          </button>
+          <span class="toolrail-spacer"></span>
+          <button id="deleteButton" class="tool-button danger" type="button" disabled title="刪除 Delete">
+            <span aria-hidden="true">⌫</span><small>刪除</small>
+          </button>
+        </nav>
+
+        <section id="stagePanel" class="stage-panel" aria-label="圖片標註畫布">
+          <canvas id="stageCanvas" tabindex="0" aria-label="圖片與標註畫布"></canvas>
+
+          <div id="emptyState" class="empty-state">
+            <div class="empty-target" aria-hidden="true">
+              <span></span><span></span>
+            </div>
+            <h2>把圖片拖進來</h2>
+            <p>或按 Ctrl+V 貼上剪貼簿圖片</p>
+            <button id="emptyOpenButton" class="button button-primary" type="button">選擇 PNG、JPG、WebP</button>
+            <small>圖片只在這台電腦的瀏覽器裡處理，不會上傳。</small>
+          </div>
+
+          <div id="dropOverlay" class="drop-overlay" hidden>
+            <strong>放開以載入圖片</strong>
+          </div>
+
+          <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+        </section>
+
+        <aside class="sidebar">
+          <div class="sidebar-tabs" role="tablist" aria-label="右側面板">
+            <button id="annotationsTab" class="tab is-active" type="button" role="tab" aria-selected="true" data-tab="annotations">標註</button>
+            <button id="outputTab" class="tab" type="button" role="tab" aria-selected="false" data-tab="output">輸出</button>
+          </div>
+
+          <section id="annotationsPanel" class="sidepanel" role="tabpanel" aria-labelledby="annotationsTab">
+            <div class="panel-heading">
+              <div>
+                <h2>標註清單</h2>
+                <p id="annotationCount">0 個定位</p>
+              </div>
+              <button id="clearAllButton" class="text-button danger-text" type="button" disabled>全部清除</button>
+            </div>
+
+            <div id="annotationList" class="annotation-list">
+              <div class="list-empty">
+                <strong>還沒有標註</strong>
+                <span>用左側的點位、框選或箭頭開始。</span>
+              </div>
+            </div>
+
+            <form id="inspector" class="inspector" hidden>
+              <div class="inspector-title-row">
+                <div>
+                  <span id="selectedBadge" class="annotation-badge">A01</span>
+                  <strong id="selectedType">矩形</strong>
+                </div>
+                <button id="copySelectedButton" class="button button-quiet" type="button">複製此標註</button>
+              </div>
+
+              <label class="field">
+                <span>操作</span>
+                <select id="operationInput">
+                  <option value="modify">修改</option>
+                  <option value="remove_inpaint">移除並補背景</option>
+                  <option value="add">新增</option>
+                  <option value="move">移動</option>
+                  <option value="preserve">保留不動</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>修改說明</span>
+                <textarea id="noteInput" rows="4" placeholder="例如：移除這個對話框與尾巴，補回牆面線條"></textarea>
+              </label>
+
+              <label id="arrowMeaningField" class="field" hidden>
+                <span>箭頭語意</span>
+                <select id="arrowMeaningInput">
+                  <option value="target">終點指向要修改的位置</option>
+                  <option value="move">從起點移動到終點</option>
+                </select>
+              </label>
+
+              <fieldset id="geometryFields" class="geometry-fields">
+                <legend>原圖像素座標</legend>
+              </fieldset>
+
+              <div class="coordinate-card">
+                <div>
+                  <span>Normalized 0–1</span>
+                  <button id="copyCoordinatesButton" class="text-button" type="button">複製座標</button>
+                </div>
+                <code id="normalizedOutput">-</code>
+              </div>
+            </form>
+          </section>
+
+          <section id="outputPanel" class="sidepanel" role="tabpanel" aria-labelledby="outputTab" hidden>
+            <div class="panel-heading">
+              <div>
+                <h2>AI 修改工作單</h2>
+                <p>座標與保留規則一次整理</p>
+              </div>
+            </div>
+
+            <label class="field">
+              <span>全域保留規則</span>
+              <textarea id="globalRulesInput" rows="4">只修改標註範圍；未標註區域、人物造型、構圖、分鏡框線、配色與畫風保持不變。</textarea>
+            </label>
+
+            <label class="field prompt-field">
+              <span>即時指令預覽</span>
+              <textarea id="promptOutput" rows="18" readonly></textarea>
+            </label>
+
+            <div class="output-actions">
+              <button id="copyAllButton" class="button button-primary" type="button" disabled>複製全部指令</button>
+              <button id="downloadJsonButton" class="button button-quiet" type="button" disabled>下載 JSON</button>
+              <button id="importJsonButton" class="button button-quiet" type="button">匯入 JSON</button>
+            </div>
+
+            <div class="privacy-note">
+              <strong>本機處理</strong>
+              <span>沒有伺服器、沒有登入、沒有圖片上傳。</span>
+            </div>
+          </section>
+        </aside>
+      </main>
+
+      <footer class="statusbar">
+        <div><span class="status-dot" id="imageStatusDot"></span><span id="imageStatus">尚未載入圖片</span></div>
+        <div class="status-spacer"></div>
+        <div>游標 <code id="cursorOutput">x -, y -</code></div>
+        <div>縮放 <code id="statusZoom">100%</code></div>
+        <div>原點：左上 · x→右 · y→下</div>
+      </footer>
+    </div>
+
+    <dialog id="confirmDialog" class="dialog">
+      <form method="dialog">
+        <h2 id="dialogTitle">要更換圖片嗎？</h2>
+        <p id="dialogMessage">目前的標註會被清除。</p>
+        <div class="dialog-actions">
+          <button value="cancel" class="button button-quiet">取消</button>
+          <button value="confirm" class="button button-primary">繼續</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="core.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
