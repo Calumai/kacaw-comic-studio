@@ -8,8 +8,11 @@
   const els = {
     app: $("#app"),
     imageInput: $("#imageInput"),
+    screenInput: $("#screenInput"),
     projectInput: $("#projectInput"),
     openImageButton: $("#openImageButton"),
+    screenButton: $("#screenButton"),
+    screenToggleButton: $("#screenToggleButton"),
     emptyOpenButton: $("#emptyOpenButton"),
     undoButton: $("#undoButton"),
     redoButton: $("#redoButton"),
@@ -57,6 +60,7 @@
   let doc = null;
   let image = null;
   let imageDataUrl = "";
+  let screenOverlay = null;
   let history = new C.History(null, 80);
   let selectedId = null;
   let hoveredId = null;
@@ -83,6 +87,10 @@
     els.fitButton.disabled = !ready;
     els.actualButton.disabled = !ready;
     els.exportMenuButton.disabled = !ready;
+    els.screenButton.disabled = !ready || !selectedAnnotation() || selectedAnnotation().type !== "rect";
+    els.screenToggleButton.disabled = !ready || !screenOverlay;
+    els.screenToggleButton.hidden = !screenOverlay;
+    els.screenToggleButton.textContent = screenOverlay?.visible ? "顯示漫畫" : "顯示真實畫面";
     els.copyAllButton.disabled = !ready || doc.annotations.length === 0;
     els.downloadJsonButton.disabled = !ready;
     els.deleteButton.disabled = !ready || !selectedId;
@@ -161,6 +169,18 @@
     const ih = doc.image.height * view.scale;
     drawCheckerboard(ctx, ix, iy, iw, ih, view.scale);
     ctx.drawImage(image, ix, iy, iw, ih);
+    if (screenOverlay?.visible && screenOverlay.image && screenOverlay.targetId) {
+      const target = doc.annotations.find((item) => item.id === screenOverlay.targetId && item.type === "rect");
+      if (target) {
+        const g = target.geometry;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(ix + g.x * view.scale, iy + g.y * view.scale, g.width * view.scale, g.height * view.scale);
+        ctx.clip();
+        ctx.drawImage(screenOverlay.image, ix + g.x * view.scale, iy + g.y * view.scale, g.width * view.scale, g.height * view.scale);
+        ctx.restore();
+      }
+    }
     ctx.save();
     ctx.strokeStyle = "rgb(255 255 255 / 0.36)";
     ctx.lineWidth = 1;
@@ -997,15 +1017,41 @@
     out.height = doc.image.height;
     const outCtx = out.getContext("2d");
     if (!overlayOnly) outCtx.drawImage(image, 0, 0, out.width, out.height);
+    if (!overlayOnly && screenOverlay?.visible && screenOverlay.image && screenOverlay.targetId) {
+      const target = doc.annotations.find((item) => item.id === screenOverlay.targetId && item.type === "rect");
+      if (target) {
+        const g = target.geometry;
+        outCtx.drawImage(screenOverlay.image, g.x, g.y, g.width, g.height);
+      }
+    }
     doc.annotations.forEach((annotation) => drawAnnotation(outCtx, annotation, {}, 1));
     out.toBlob((blob) => {
       if (!blob) {
         toast("PNG 匯出失敗。", "error");
         return;
       }
-      downloadBlob(blob, `${baseName()}-${overlayOnly ? "anchor-overlay" : "annotated"}.png`);
-      toast(overlayOnly ? "已下載透明標註層" : "已下載帶標註 PNG");
+      const suffix = overlayOnly ? "anchor-overlay" : screenOverlay?.visible ? "real-screen-composite" : "annotated";
+      downloadBlob(blob, `${baseName()}-${suffix}.png`);
+      toast(overlayOnly ? "已下載透明標註層" : screenOverlay?.visible ? "已下載漫畫＋真實畫面合成圖" : "已下載帶標註 PNG");
     }, "image/png");
+  }
+
+  async function loadScreenFile(file) {
+    if (!file || !image || !doc) return;
+    const target = selectedAnnotation();
+    if (!target || target.type !== "rect") {
+      toast("請先選取一個矩形螢幕區域，再載入真實畫面。", "error");
+      return;
+    }
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      toast("真實畫面目前僅支援 PNG、JPG、WebP。", "error");
+      return;
+    }
+    const dataUrl = await readAsDataUrl(file);
+    const loaded = await decodeImage(dataUrl);
+    screenOverlay = { image: loaded, dataUrl, fileName: file.name, targetId: target.id, visible: true };
+    renderAll();
+    toast(`已將「${file.name}」套入 ${target.id} 螢幕區域`);
   }
 
   async function importProject(file) {
@@ -1059,6 +1105,17 @@
     els.imageInput.addEventListener("change", () => {
       loadImageFile(els.imageInput.files[0]).catch((error) => toast(error.message, "error"));
       els.imageInput.value = "";
+    });
+    els.screenInput.addEventListener("change", () => {
+      loadScreenFile(els.screenInput.files[0]).catch((error) => toast(error.message, "error"));
+      els.screenInput.value = "";
+    });
+    els.screenButton.addEventListener("click", () => els.screenInput.click());
+    els.screenToggleButton.addEventListener("click", () => {
+      if (!screenOverlay) return;
+      screenOverlay.visible = !screenOverlay.visible;
+      renderAll();
+      toast(screenOverlay.visible ? "已顯示真實操作畫面" : "已切回漫畫畫面");
     });
     els.projectInput.addEventListener("change", () => {
       if (els.projectInput.files[0]) importProject(els.projectInput.files[0]);
@@ -1132,6 +1189,13 @@
       if (!action) return;
       els.exportMenu.hidden = true;
       if (action === "annotated") exportPng(false);
+      if (action === "composite") {
+        if (!screenOverlay?.visible) {
+          toast("請先載入並顯示真實操作畫面。", "error");
+        } else {
+          exportPng(false);
+        }
+      }
       if (action === "overlay") exportPng(true);
       if (action === "json") exportJson();
       if (action === "prompt") exportPrompt();

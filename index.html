@@ -24,10 +24,13 @@
 
         <div class="topbar-actions">
           <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+          <input id="screenInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
           <input id="projectInput" type="file" accept="application/json,.json" hidden />
           <button id="openImageButton" class="button button-primary" type="button">
             <span aria-hidden="true">＋</span> 載入圖片
           </button>
+          <button id="screenButton" class="button button-quiet" type="button" disabled>載入真實畫面</button>
+          <button id="screenToggleButton" class="button button-quiet" type="button" disabled hidden>漫畫畫面</button>
           <button id="undoButton" class="icon-button" type="button" title="復原 Ctrl+Z" disabled>↶</button>
           <button id="redoButton" class="icon-button" type="button" title="重做 Ctrl+Y" disabled>↷</button>
           <span class="toolbar-divider" aria-hidden="true"></span>
@@ -38,6 +41,7 @@
           <button id="exportMenuButton" class="button button-accent" type="button" disabled>匯出 ▾</button>
           <div id="exportMenu" class="menu" hidden>
             <button type="button" data-export="annotated">帶標註 PNG</button>
+            <button type="button" data-export="composite">合成真實畫面 PNG</button>
             <button type="button" data-export="overlay">透明標註層 PNG</button>
             <button type="button" data-export="json">定位專案 JSON</button>
             <button type="button" data-export="prompt">AI 修改指令 TXT</button>
